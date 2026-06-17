@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>バス釣り名人 — BASS MASTER 8bit</title>
+
+<!-- ===== OPEN GRAPH: the in-feed bait ===== -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="▶ バス釣り名人 — PLAY NOW">
+<meta property="og:description" content="A playable 8-bit Japanese bass fishing game. Cast, wait for the strike, set the hook. Insert coin to begin.">
+<meta property="og:image" content="https://REPLACE_WITH_YOUR_USERNAME.github.io/bass-master/preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="▶ バス釣り名人 — PLAY NOW">
+<meta name="twitter:image" content="https://REPLACE_WITH_YOUR_USERNAME.github.io/bass-master/preview.png">
+
+<style>
+  @font-face { font-family:'press'; src: local('Courier New'); }
+  :root{
+    --ink:#0b1a2b; --water:#2a6cc9; --water2:#1f4f9c; --sky:#7cc6e8;
+    --sand:#e8cf8f; --grass:#3aa856; --lily:#2f8f4a; --hud:#101820;
+    --gold:#ffd23f; --red:#d83232; --cream:#f4efd8;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;image-rendering:pixelated;}
+  html,body{height:100%;background:#000;overflow:hidden;font-family:'Courier New',monospace;}
+  #wrap{height:100%;display:flex;align-items:center;justify-content:center;}
+  canvas{
+    width:min(100vw,100vh*0.75);
+    height:min(133vw,100vh);
+    background:#000;
+    box-shadow:0 0 0 4px #1a1a1a, 0 0 40px rgba(0,0,0,.8);
+    touch-action:none;
+  }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="g" width="240" height="320"></canvas></div>
+<script>
+const cv=document.getElementById('g'), x=cv.getContext('2d');
+x.imageSmoothingEnabled=false;
+const W=240,H=320;
+
+// ---- NES-ish palette ----
+const C={sky:'#7cc6e8',skyD:'#5aa9d0',water:'#2a6cc9',waterD:'#1f4f9c',waterL:'#3f86e0',
+  sand:'#e8cf8f',grass:'#3aa856',grassD:'#2c8443',ink:'#0b1a2b',gold:'#ffd23f',
+  red:'#d83232',cream:'#f4efd8',white:'#ffffff',black:'#0a0a0a',brown:'#8a5a2b',
+  bass:'#5a7d3a',bassB:'#3f5a28',bassW:'#cdd6a0',shadow:'rgba(0,0,0,.25)'};
+
+// pixel helpers
+function px(px_,py,w,h,c){x.fillStyle=c;x.fillRect(px_,py,w,h);}
+function text(s,px_,py,c,sc=1){
+  x.fillStyle=c; x.font=`${6*sc}px 'Courier New',monospace`; x.textBaseline='top';
+  x.fillText(s,px_,py);
+}
+function textC(s,py,c,sc=1){
+  x.font=`${6*sc}px 'Courier New',monospace`;
+  const w=x.measureText(s).width; text(s,(W-w)/2,py,c,sc);
+}
+
+// ---- state machine ----
+let state='title';      // title | aim | cast | wait | strike | reel | caught | miss
+let t=0;                 // global tick
+let score=0, caught=0, best=0;
+let castX=120, castDir=1, lurePx=0, lurePy=0;
+let waitTimer=0, strikeWin=0, biteAt=0;
+let reelProg=0, fishSize=0, fishName='';
+let msgTimer=0, msg='';
+let shakeT=0;
+
+const FISH=[
+  {n:'コバス',  en:'SMALL BASS', min:1,max:2, pts:100, w:0.45},
+  {n:'バス',    en:'BASS',       min:2,max:4, pts:250, w:0.32},
+  {n:'デカバス',en:'BIG BASS',   min:4,max:6, pts:500, w:0.16},
+  {n:'ヌシ',    en:'THE LORD',   min:7,max:9, pts:1500,w:0.07},
+];
+function rollFish(){
+  let r=Math.random(),a=0;
+  for(const f of FISH){a+=f.w; if(r<=a)return f;}
+  return FISH[0];
+}
+
+// ---- input ----
+let pressed=false;
+function act(){
+  if(state==='title'){ state='aim'; t=0; return; }
+  if(state==='aim'){ // lock cast, fly the lure
+    state='cast'; lurePx=castX; lurePy=120; t=0; return;
+  }
+  if(state==='wait'){ // early = miss
+    msg='はやい! (TOO EARLY)'; msgTimer=60; flub(); return;
+  }
+  if(state==='strike'){ // set hook!
+    const acc=1-(t/strikeWin);
+    setHook(acc); return;
+  }
+  if(state==='caught'||state==='miss'){ // continue
+    state='aim'; t=0; return;
+  }
+}
+function flub(){ state='wait'; waitTimer=40+Math.random()*60; biteAt=waitTimer+30+Math.random()*120; }
+function setHook(acc){
+  const f=rollFish();
+  fishName=f.n; fishSize=(f.min+Math.random()*(f.max-f.min));
+  const gained=Math.round(f.pts*(0.5+acc*0.5));
+  score+=gained; caught++; if(score>best)best=score;
+  reelProg=0; state='reel'; lastFish={f,gained};
+  shakeT=8;
+}
+let lastFish=null;
+
+cv.addEventListener('pointerdown',e=>{e.preventDefault();pressed=true;act();});
+cv.addEventListener('pointerup',e=>{e.preventDefault();pressed=false;});
+window.addEventListener('keydown',e=>{ if(e.code==='Space'||e.code==='Enter'){e.preventDefault(); if(!e.repeat)act();}});
+
+// ---- drawing scene ----
+function bg(){
+  // sky
+  px(0,0,W,90,C.sky);
+  // distant hills
+  x.fillStyle=C.grassD;
+  for(let i=0;i<3;i++){ const cx=40+i*90, r=46; x.beginPath();x.arc(cx,96,r,Math.PI,0);x.fill(); }
+  // far treeline pixels
+  for(let i=0;i<W;i+=8){ px(i,78,6,14,(i/8)%2?C.grass:C.grassD); }
+  // water
+  px(0,90,W,H-90,C.water);
+  // water bands
+  for(let i=0;i<6;i++){ px(0,100+i*30,W,3,(i%2)?C.waterD:C.waterL); }
+  // animated ripples
+  for(let i=0;i<7;i++){
+    const ry=140+i*22, rx=(t*0.6+i*40)%W;
+    px(rx,ry,10,2,C.waterL); px((rx+120)%W,ry+8,8,2,C.waterL);
+  }
+  // bank + reeds
+  px(0,86,W,8,C.sand);
+  for(let i=0;i<W;i+=14){ px(i,72,3,16,C.grassD); px(i+5,68,3,20,C.grass); }
+  // lily pads
+  px(40,200,16,7,C.lily||C.grassD); px(160,250,18,7,C.grassD); px(110,170,14,6,C.grassD);
+}
+
+// angler (bottom, pixel dude)
+function angler(){
+  const ax=W/2-10, ay=H-46;
+  px(ax,ay,20,28,C.ink);          // body
+  px(ax+4,ay-10,12,12,C.cream);   // head
+  px(ax+4,ay-12,12,4,C.red);      // cap
+  px(ax-2,ay+6,6,4,C.brown);      // arm
+  // rod
+  x.strokeStyle=C.brown;x.lineWidth=2;x.beginPath();
+  x.moveTo(ax-2,ay+8); x.lineTo(ax-40,ay-60); x.stroke();
+}
+
+function lure(px_,py){ px(px_-1,py-1,3,3,C.gold); }
+
+function fishShadow(fx,fy,s){
+  x.fillStyle=C.shadow;
+  x.beginPath();x.ellipse(fx,fy,8*s,4*s,0,0,7);x.fill();
+}
+function drawBass(fx,fy,s,flip){
+  x.save();x.translate(fx,fy);if(flip)x.scale(-1,1);x.scale(s,s);
+  px(-12,-4,20,8,C.bass); px(-12,-1,20,3,C.bassB);   // body
+  px(8,-3,4,6,C.bass);                                // head
+  // tail
+  x.fillStyle=C.bass;x.beginPath();x.moveTo(-12,-4);x.lineTo(-18,-7);x.lineTo(-18,7);x.lineTo(-12,4);x.fill();
+  px(-2,-8,8,4,C.bass);                               // dorsal
+  px(9,-2,2,2,C.white); px(9,-2,1,1,C.black);         // eye
+  px(-10,-2,16,1,C.bassW);                            // lateral line
+  x.restore();
+}
+
+// ---- HUD ----
+function hud(){
+  px(0,0,W,16,'rgba(8,12,18,.78)');
+  text('SCORE '+String(score).padStart(6,'0'),4,5,C.gold);
+  text('魚 '+caught,W-58,5,C.cream);
+  text('BEST '+String(best).padStart(5,'0'),W-46,5,C.white,0.85);
+}
+
+// ---- meters ----
+function powerBar(){
+  // aim oscillator
+  const bw=140,bx=(W-bw)/2,by=H-70;
+  px(bx-2,by-2,bw+4,12,C.ink);
+  for(let i=0;i<bw;i+=4) px(bx+i,by,3,8,(i/4)%2?C.waterD:C.water);
+  const k=bx+ (Math.sin(t*0.08)*0.5+0.5)*bw;
+  castX=20+ (Math.sin(t*0.08)*0.5+0.5)*(W-40);
+  px(k-2,by-3,4,14,C.gold);
+  textC('TAP TO CAST',by+16,C.white);
+}
+
+// ===== main loop =====
+function loop(){
+  t++;
+  let sx=0,sy=0;
+  if(shakeT>0){ sx=(Math.random()*2-1)*2; sy=(Math.random()*2-1)*2; shakeT--; }
+  x.save(); x.translate(sx,sy);
+
+  bg();
+
+  if(state==='title'){
+    // dim
+    px(0,0,W,H,'rgba(4,10,20,.55)');
+    // big katakana title plate
+    px(20,70,W-40,64,C.ink); px(22,72,W-44,60,C.water);
+    px(22,72,W-44,8,C.waterL);
+    textC('バス釣り名人',86,C.gold,3.0);
+    textC('BASS MASTER',120,C.cream,1.1);
+    // blinking prompt
+    if((t>>4)&1) textC('▶ TAP / SPACE TO START',180,C.white,1.2);
+    textC('© 198X NEW BRAUNFELS SOFT',285,'rgba(255,255,255,.5)',0.85);
+    // little bass swimming across title
+    drawBass((t*0.8)%W,240,1.4,((t*0.8)%(W*2))>W);
+  }
+  else if(state==='aim'){
+    angler(); powerBar();
+    textC('狙え! AIM YOUR CAST',24,C.cream);
+    // aim indicator on water
+    lure(castX,118);
+  }
+  else if(state==='cast'){
+    angler();
+    lurePx += (castX-lurePx)*0.18;
+    lurePy += (150-lurePy)*0.12 + 1;
+    lure(lurePx,lurePy);
+    if(t>22){ state='wait'; waitTimer=40+Math.random()*60; biteAt=waitTimer+40+Math.random()*150; lurePy=150; }
+  }
+  else if(state==='wait'){
+    angler(); lure(castX,lurePy);
+    // bobbing
+    lurePy=150+Math.sin(t*0.2)*2;
+    textC('待て... WAIT FOR IT',24,C.cream);
+    // shadow approaches before bite
+    if(t>biteAt-40){ fishShadow(castX-20+ (t-(biteAt-40)),lurePy+14,1+( (t-(biteAt-40))/40)); }
+    if(t>=biteAt){ state='strike'; t=0; strikeWin=22+Math.random()*10; }
+  }
+  else if(state==='strike'){
+    angler();
+    // splash + flashing HIT
+    px(castX-8,lurePy-4,16,10,C.white);
+    px(castX-5,lurePy-7,10,8,C.waterL);
+    if((t>>1)&1) textC('!! 合わせろ! STRIKE — TAP !!',24,C.red,1.2);
+    else textC('!! 合わせろ! STRIKE — TAP !!',24,C.gold,1.2);
+    fishShadow(castX,lurePy+12,2.2);
+    if(t>strikeWin){ msg='にげられた! (IT GOT AWAY)'; msgTimer=70; state='miss'; t=0; }
+  }
+  else if(state==='reel'){
+    angler();
+    reelProg+=0.018+Math.random()*0.01;
+    const fy=150-(150-(H-90))*0; // unused
+    const py=150-(reelProg*70);
+    fishShadow(castX,py+12,1.6);
+    drawBass(castX,py,1.6+reelProg*0.6,false);
+    // reel meter
+    const bw=140,bx=(W-bw)/2,by=H-60;
+    px(bx-2,by-2,bw+4,10,C.ink);
+    px(bx,by,bw*Math.min(reelProg,1),6,C.gold);
+    textC('巻け! REELING IN',24,C.cream);
+    if(reelProg>=1){ state='caught'; t=0; }
+  }
+  else if(state==='caught'){
+    px(0,0,W,H,'rgba(6,14,26,.55)');
+    px(28,90,W-56,120,C.ink); px(30,92,W-60,116,C.water); px(30,92,W-60,8,C.waterL);
+    textC('やったぜ!',104,C.gold,2.2);
+    textC('FISH ON!',132,C.cream,1.2);
+    drawBass(W/2,164,2.6,false);
+    if(lastFish){
+      textC(lastFish.f.n+'  '+fishSize.toFixed(1)+'kg',186,C.white,1.1);
+      textC('+'+lastFish.gained+' pts',300,C.gold,1.1);
+    }
+    if((t>>4)&1) textC('▶ TAP TO CAST AGAIN',210,C.white);
+  }
+  else if(state==='miss'){
+    angler();
+    if((t>>3)&1) textC('にげられた!',150,C.red,1.6);
+    else textC('IT GOT AWAY',150,C.red,1.4);
+    if(t>50 && ((t>>4)&1)) textC('▶ TAP TO TRY AGAIN',180,C.white);
+    if(t>50 && pressedOnce()) {}
+  }
+
+  // floating message
+  if(msgTimer>0){ msgTimer--; textC(msg,60,C.red,1.0); }
+
+  hud();
+  x.restore();
+  requestAnimationFrame(loop);
+}
+function pressedOnce(){return false;}
+loop();
+</script>
+</body>
+</html>
